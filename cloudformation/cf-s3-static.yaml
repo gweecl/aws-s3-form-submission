@@ -1,0 +1,289 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+
+Description: >
+  Static web hosting on S3.
+  And using CodePipeline and CodeBuild for continuous delivery of a single-page application to S3
+
+
+Parameters:
+  EnvType:
+    Description: Environment type.
+    Default: dev
+    Type: String
+    AllowedValues: [prod, dev]
+    ConstraintDescription: must specify prod or dev.
+  SiteBucketName:
+    Type: String
+    Description: Name of bucket to create to host the website
+  GitHubUser:
+    Type: String
+    Description: GitHub User
+  GitHubRepo:
+    Type: String
+    Description: GitHub Repo to pull from. Only the Name. not the URL
+  GitHubBranch:
+    Type: String
+    Description: GitHub Branch
+    Default: "master"
+  GitHubToken:
+    NoEcho: true
+    Type: String
+    Description: Secret. It might look something like 9b189a1654643522561f7b3ebd44a1531a4287af OAuthToken with access to Repo. Go to https://github.com/settings/tokens
+  CodePipelineName:
+    Description: A name for cloudformation pipeline
+    Type: String
+  S3CodePipelineBucketName:
+    Description: S3 Bucket Name for CodePipeline artifact store.
+    Type: String
+  BuildType:
+    Type: String
+    Default: "LINUX_CONTAINER"
+    Description: The build container type to use for building the app
+  BuildComputeType:
+    Type: String
+    Default: "BUILD_GENERAL1_SMALL"
+    Description: The build compute type to use for building the app
+  BuildImage:
+    Type: String
+    Default: "aws/codebuild/standard:2.0"
+    Description: The build image to use for building the app
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Site Configuration"
+        Parameters:
+          - SiteBucketName
+      - Label:
+          default: "CI/CD Configuration"
+        Parameters:
+          - GitHubToken
+          - GitHubUser
+          - GitHubRepo
+          - GitHubBranch
+          - CodePipelineName
+          - S3CodePipelineBucketName
+      - Label:
+          default: "Build Configuration"
+        Parameters:
+          - BuildType
+          - BuildComputeType
+          - BuildImage
+    ParameterLabels:
+      SiteBucketName:
+        default: Name of S3 Bucket to create for website hosting
+      GitHubToken:
+        default: GitHub OAuth2 Token
+      GitHubUser: 
+        default: GitHub User/Org Name
+      GitHubRepo: 
+        default: GitHub Repository Name
+      GitHubBranch: 
+        default: GitHub Branch Name
+      CodePipelineName: 
+        default: Name of the CodePipeline
+      S3CodePipelineBucketName: 
+        default: S3 Bucket Name for the CodePipeline Artifacts
+      BuildType: 
+        default: CodeBuild type
+      BuildComputeType: 
+        default: CodeBuild instance type
+      BuildImage: 
+        default: CodeBuild image
+
+
+Conditions:
+  CreateProdResources: !Equals [!Ref EnvType, prod]
+  CreateDevResources: !Equals [!Ref EnvType, dev]
+
+
+Resources:
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - codebuild.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: codebuild-service
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action: "s3:*"
+            Resource: 
+            - !Join [ "", [ !GetAtt [SiteBucket, Arn], "/*" ] ]
+            - !Join [ "", [ !GetAtt [PipelineBucket, Arn], "/*" ] ]
+          - Effect: Allow
+            Action: 
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: "*"
+          Version: '2012-10-17'
+
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - codepipeline.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: codepipeline-service
+        PolicyDocument:
+          Statement:
+          - Action:
+            - codebuild:*
+            Resource: !GetAtt [CodeBuildDeploySite, Arn]
+            Effect: Allow
+          - Action:
+            - s3:GetObject
+            - s3:GetObjectVersion
+            - s3:GetBucketVersioning
+            Resource: 
+            - !Join [ "", [ !GetAtt [PipelineBucket, Arn], "/*" ] ]
+            Effect: Allow
+          - Action:
+            - s3:PutObject
+            Resource:
+            - !Join [ "", [ !GetAtt [PipelineBucket, Arn], "/*" ] ]
+            Effect: Allow
+          Version: '2012-10-17'
+
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref SiteBucketName
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: error.html
+
+  PipelineBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref 'S3CodePipelineBucketName'
+
+  CodeBuildDeploySite:
+    Type: AWS::CodeBuild::Project
+    DependsOn: CodeBuildRole
+    Properties:
+      Name: !Sub ${AWS::StackName}-DeploySite
+      Description: Deploy site to S3
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: !Ref BuildType
+        ComputeType: !Ref BuildComputeType
+        Image: !Sub ${BuildImage}
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub |
+          version: 0.1
+          phases:
+            runtime-versions:
+              docker: 18
+            post_build:
+              commands:
+                # copy images
+                - |
+                  aws s3 cp \
+                  --acl public-read \
+                  --exclude "*" \
+                  --include "*.ico" \
+                  --include "*.jpg" \
+                  --include "*.png" \
+                  --include "*.gif" \
+                  --cache-control="max-age=86400" \
+                  --recursive \
+                  ./html \
+                  s3://${SiteBucketName}/
+                # gzip all exclude images
+                - |
+                  find ./html -type f \
+                  -not \( -iname '*.ico' -or -iname '*.jpg' -or -iname '*.png' -or -iname '*.gif' \) \
+                  -exec gzip "{}" \; -exec mv "{}.gz" "{}" \;
+                # copy all gzipped files
+                - | 
+                  aws s3 cp \
+                  --acl public-read \
+                  --include "*" \
+                  --exclude "*.ico" \
+                  --exclude "*.jpg" \
+                  --exclude "*.png" \
+                  --exclude "*.gif" \
+                  --content-encoding="gzip" \
+                  --cache-control="max-age=86400" \
+                  --recursive \
+                  ./html \
+                  s3://${SiteBucketName}/ 
+          artifacts:
+            type: zip
+            files:
+              - ./**/*
+      TimeoutInMinutes: 10
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Ref 'CodePipelineName'
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      Stages:
+      - Name: Source
+        Actions:
+        - InputArtifacts: []
+          Name: Source
+          ActionTypeId:
+            Category: Source
+            Owner: ThirdParty
+            Version: '1'
+            Provider: GitHub
+          OutputArtifacts:
+          - Name: SourceArtifacts
+          Configuration:
+            Owner: !Ref GitHubUser
+            Repo: !Ref GitHubRepo
+            Branch: !Ref GitHubBranch
+            OAuthToken: !Ref GitHubToken
+          RunOrder: 1
+      - Name: Deploy
+        Actions:
+        - Name: Artifact
+          ActionTypeId:
+            Category: Build
+            Owner: AWS
+            Version: '1'
+            Provider: CodeBuild
+          InputArtifacts:
+          - Name: SourceArtifacts
+          OutputArtifacts:
+          - Name: DeploymentArtifacts
+          Configuration:
+            ProjectName: !Ref CodeBuildDeploySite
+          RunOrder: 1
+      ArtifactStore:
+        Type: S3
+        Location: !Ref PipelineBucket
+
+Outputs:
+  PipelineUrl:
+    Value: !Sub https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${Pipeline}
+    Description: CodePipeline URL
+  SiteUrl:
+    Value: !GetAtt [SiteBucket, WebsiteURL]
+    Description: S3 Website URL

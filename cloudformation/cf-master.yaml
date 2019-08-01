@@ -1,0 +1,150 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+
+
+Description: >
+  This is a root stack which creates all required nested stacks.
+  AWS Serverless Application Model (SAM)
+  https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md
+
+
+####################################################################################
+Parameters:
+####################################################################################
+
+  EnvType:
+    Description: Environment type.
+    Default: dev
+    Type: String
+    AllowedValues: [prod, dev]
+    ConstraintDescription: must specify prod or dev.
+
+  SiteBucketName:
+    Type: String
+    Description: Name of bucket to create to host the website
+
+  GitHubUser:
+    Type: String
+    Description: GitHub User
+
+  GitHubRepo:
+    Type: String
+    Description: GitHub Repo to pull from. Only the Name. not the URL
+
+  GitHubBranch:
+    Type: String
+    Description: GitHub Branch
+    Default: "master"
+
+  GitHubToken:
+    NoEcho: true
+    Type: String
+    Description: Secret. It might look something like 9b189a1654643522561f7b3ebd44a1531a4287af OAuthToken with access to Repo. Go to https://github.com/settings/tokens
+  
+  CodePipelineName:
+    Description: A name for cloudformation pipeline
+    Type: String
+  
+  S3CodePipelineBucketName:
+    Description: S3 Bucket Name for CodePipeline artifact store.
+    Type: String
+
+  BuildType:
+    Type: String
+    Default: "LINUX_CONTAINER"
+    Description: The build container type to use for building the app
+
+  BuildComputeType:
+    Type: String
+    Default: "BUILD_GENERAL1_SMALL"
+    Description: The build compute type to use for building the app
+
+  BuildImage:
+    Type: String
+    Default: "aws/codebuild/standard:2.0"
+    Description: The build image to use for building the app
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Environment
+        Parameters:
+          - EnvType
+      - Label:
+          default: "Site Configuration"
+        Parameters:
+          - SiteBucketName
+      - Label:
+          default: CI/CD Configuration
+        Parameters:
+          - GitHubUser
+          - GitHubRepo
+          - GitHubBranch
+          - GitHubToken
+          - CodePipelineName
+          - S3CodePipelineBucketName
+      - Label:
+          default: "Build Configuration"
+        Parameters:
+          - BuildType
+          - BuildComputeType
+          - BuildImage
+    ParameterLabels:
+      SiteBucketName:
+        default: Name of S3 Bucket to create for website hosting
+      GitHubToken:
+        default: GitHub OAuth2 Token
+      GitHubUser: 
+        default: GitHub User/Org Name
+      GitHubRepo: 
+        default: GitHub Repository Name
+      GitHubBranch: 
+        default: GitHub Branch Name
+      CodePipelineName: 
+        default: Name of the CodePipeline
+      S3CodePipelineBucketName: 
+        default: S3 Bucket Name for the CodePipeline Artifacts
+      BuildType: 
+        default: CodeBuild type
+      BuildComputeType: 
+        default: CodeBuild instance type
+      BuildImage: 
+        default: CodeBuild image
+
+
+Conditions:
+  CreateProdResources: !Equals [!Ref EnvType, prod]
+  CreateDevResources: !Equals [!Ref EnvType, dev]
+
+
+Resources:
+  CloudformationPipeline:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: "./cf-s3-static.yaml"
+      Parameters:
+        EnvType: !Ref EnvType
+        SiteBucketName: !Ref SiteBucketName
+        GitHubUser: !Ref GitHubUser
+        GitHubRepo: !Ref GitHubRepo
+        GitHubBranch: !Ref GitHubBranch
+        GitHubToken: !Ref GitHubToken
+        CodePipelineName: !Ref CodePipelineName
+        S3CodePipelineBucketName: !Ref S3CodePipelineBucketName
+        BuildType: !Ref BuildType
+        BuildComputeType: !Ref BuildComputeType
+        BuildImage: !Ref BuildImage
+  
+  ServerlessFunctions:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: "./cf-lambda.yaml"
+
+Outputs:
+  CloudformationPipelineUrl:
+    Description: The continuous deployment pipeline for CloudFormation in the AWS Management Console.
+    Value: !GetAtt CloudformationPipeline.Outputs.PipelineUrl
+  CloudformationS3HostedSite:
+    Description: URL to Static web hosting on S3.
+    Value: !GetAtt CloudformationPipeline.Outputs.SiteUrl

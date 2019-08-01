@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+
+
+Description: >
+  Resources that deploy lambda functions.
+  AWS Serverless Application Model (SAM)
+  https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md
+
+
+####################################################################################
+Parameters:
+####################################################################################
+
+  EnvType:
+    Description: Environment type.
+    Default: dev
+    Type: String
+    AllowedValues: [prod, dev]
+    ConstraintDescription: must specify prod or dev.
+
+
+####################################################################################
+Conditions:
+####################################################################################
+
+  CreateProdResources: !Equals [!Ref EnvType, prod]
+  CreateDevResources: !Equals [!Ref EnvType, dev]
+
+
+####################################################################################
+Resources:
+####################################################################################
+
+  LambdaExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - ses:SendEmail
+  
+  SendEmailApiEndpoint:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: "form-submission-endpoint"
+      StageName: !Ref EnvType
+
+  SendEmailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs10.x
+      Role: !GetAtt LambdaExecutionRole.Arn
+      FunctionName: "form-submission-function"
+      CodeUri: "./lambda/send_email/"
+      Events:
+        SendEmailApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref SendEmailApiEndpoint
+            Path: /
+            Method: post
+          
+
+####################################################################################
+Outputs:
+####################################################################################
+
+  SendEmailFunction:
+    Description: Lambda service ARN.
+    Value: !GetAtt SendEmailFunction.Arn
