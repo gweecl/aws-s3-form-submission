@@ -61,6 +61,7 @@ Resources:
     Properties:
       Name: "form-submission-endpoint"
       StageName: !Ref EnvType
+      Cors: "'*'"
 
   SendEmailFunction:
     Type: AWS::Serverless::Function
