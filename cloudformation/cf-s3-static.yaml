@@ -194,10 +194,11 @@ Resources:
       Source:
         Type: CODEPIPELINE
         BuildSpec: !Sub |
-          version: 0.1
+          version: 0.2
           phases:
-            runtime-versions:
-              docker: 18
+            install:
+              runtime-versions:
+                docker: 18
             post_build:
               commands:
                 # copy images
