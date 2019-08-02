@@ -14,6 +14,7 @@ var response = {
 };
 
 exports.handler = function (event, context) {
+    event = JSON.parse(event.body); // https://stackoverflow.com/a/52240132
     console.log('Received event:', event);
     sendEmail(event, function (err, data) {
         context.done(err, data);
