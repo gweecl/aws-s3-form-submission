@@ -12,7 +12,7 @@ This repository consists:
 
 ## Documentations
 
-- [S3 Bucket Policy](./docs/s3.md)
+- [S3 Bucket Policy](./docs/s3-bucket-policy.md)
 
 ## Reference
 
