@@ -10,6 +10,10 @@ This repository consists:
   - Create Continuous Delivery of the website to S3 via CodeBuild and CodePipeline
   - Create Serverless Functions that send email using SES
 
+## Documentations
+
+- [S3 Bucket Policy](./docs/s3.md)
+
 ## Reference
 
 - <https://github.com/stelligent/devops-essentials/blob/master/samples/static/README.md/>
